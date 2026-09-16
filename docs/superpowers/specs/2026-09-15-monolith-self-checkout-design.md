@@ -27,13 +27,14 @@ Success criteria:
 | Area | Decision | Why |
 | --- | --- | --- |
 | Language / HTTP | C++20, Drogon 1.8.7 (apt `libdrogon-dev`) | Async framework with routing, filters (week 8 rate limiter), HTTP client (weeks 4–5), and an async Postgres client with coroutines. |
-| Database | Postgres 16 in Docker Compose | Networked and multi-writer, so it survives the service-based / microservices weeks unchanged. |
+| Database | Postgres 18 in Docker Compose (image `postgres:18`, 18.6 current as of 2026-09) | Networked and multi-writer, so it survives the service-based / microservices weeks unchanged. PG 19 is still beta. |
 | Open baskets | RAM only; persisted at completion | Scan touches no DB. Trade-off: a crash loses open baskets, never completed sales. |
 | Out-of-stock at completion | Charge the customer, floor stock at 0 | Spec: never negative, never gate a scan, payment always succeeds. Matches the mock. |
 | Money | Integer cents in RAM and DB; double only in JSON | No float drift after 20 scans. |
 | Popular items | Hopping window in RAM; top-10 snapshot persisted every 500 scans | Spec requires DB persistence of the ranking; scans never wait on that insert. |
 | JSON | jsoncpp (bundled with Drogon) | Nothing to vendor. |
-| Tests | Catch2 v3 (apt, installed) | One header, terse assertions. |
+| Tests | Catch2 3.4.0 (apt) | One header, terse assertions. Upstream is 3.16; nothing we use changed since 3.0. |
+| Versions checked 2026-09-15 | Drogon apt 1.8.7 vs upstream 1.9.x; no open CVEs against 1.8.7 (last fixes landed in 1.8.4). Every API the spec relies on was verified in the installed headers. | Upstream 1.9 adds nothing we need; DB transactions still commit on destruction with no awaitable commit, so `complete_sale()` stays. |
 | Names | tables `sales`, `receipt_lines`; RAM module `Transactions` | User preference. |
 
 ---
@@ -50,7 +51,7 @@ CS6510-2026/
     ├── CMakeLists.txt
     ├── CMakePresets.json
     ├── config.json            Drogon + app config (one file)
-    ├── docker-compose.yml     Postgres 16
+    ├── docker-compose.yml     Postgres 18
     ├── README.md              5-line how-to-run
     ├── ANALYSIS.md            architectural characteristics (graded)
     ├── reports/               report-*.json from the load client (graded)
@@ -109,7 +110,7 @@ load-client ──HTTP/1.1 keep-alive──▶ Drogon (IO threads = CPU cores)
                                         └─ Snapshots          SQL only (fire-and-forget insert, co_await read)
                                                   │
                                                   ▼  Drogon DbClient, 16 connections
-                                              Postgres 16 (docker compose)
+                                              Postgres 18 (docker compose)
 ```
 
 | Request | RAM | DB |
@@ -134,7 +135,7 @@ with a DB entry ever `co_await`. Nothing blocks an IO thread.
 ```yaml
 services:
   db:
-    image: postgres:16
+    image: postgres:18
     container_name: checkout-db
     environment:
       POSTGRES_USER: checkout
@@ -143,7 +144,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql        # PG 18+: mount here, NOT /var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U checkout -d checkout"]
       interval: 2s
@@ -156,14 +157,18 @@ volumes:
 
 What each part does:
 
-- `image: postgres:16` — pulled from Docker Hub on first `up`. The image's
+- `image: postgres:18` — pulled from Docker Hub on first `up`. The image's
   entrypoint script reads the three `POSTGRES_*` env vars **only the first time
   it starts on an empty volume** and creates that role + database. Changing them
   later does nothing until you `docker compose down -v`.
 - `ports: "5432:5432"` — host port 5432 → container port 5432. This is why the
   server and host `psql` both connect to `localhost:5432`.
 - `volumes: pgdata` — a named volume; data survives `docker compose down` and
-  laptop reboots. We reset with SQL, not by deleting the volume.
+  laptop reboots. We reset with SQL, not by deleting the volume. The mount
+  point changed in the `postgres:18` image: it is `/var/lib/postgresql` (the
+  server puts its files in `18/docker` under it). Older guides say
+  `/var/lib/postgresql/data`; with 18 that path silently loses your data on
+  every container restart.
 - `healthcheck` — `docker compose up -d --wait` blocks until `pg_isready`
   succeeds, so scripts never race the DB startup.
 
