@@ -3,3 +3,4 @@ monolith/build/
 *.swp
 load-client/out/
 .vscode/
+tmux-*.log
