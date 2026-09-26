@@ -1,5 +1,6 @@
 chats/
 monolith/build/
+layered/build/
 *.swp
 load-client/out/
 .vscode/
