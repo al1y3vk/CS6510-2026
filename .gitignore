@@ -1,6 +1,8 @@
 chats/
+diagrams/
 monolith/build/
 layered/build/
+pipeline/build/
 *.swp
 load-client/out/
 .vscode/

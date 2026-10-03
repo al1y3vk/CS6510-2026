@@ -1,0 +1,25 @@
+{
+  "listeners": [{ "address": "0.0.0.0", "port": 8080 }],
+  "app": {
+    "number_of_threads": 0,
+    "float_precision_in_json": { "precision": 2, "precision_type": "decimal" },
+    "log": { "log_path": "", "log_level": "INFO" }
+  },
+  "db_clients": [{
+    "name": "default",
+    "rdbms": "postgresql",
+    "host": "127.0.0.1",
+    "port": 5432,
+    "dbname": "checkout",
+    "user": "checkout",
+    "passwd": "checkout",
+    "is_fast": false,
+    "connection_number": 16
+  }],
+  "custom_config": {
+    "low_stock_threshold": 50,
+    "window_size": 1000,
+    "slide_interval": 500,
+    "popular_top_n": 10
+  }
+}
