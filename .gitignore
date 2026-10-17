@@ -3,6 +3,7 @@ diagrams/
 monolith/build/
 layered/build/
 pipeline/build/
+services/build/
 *.swp
 load-client/out/
 .vscode/
