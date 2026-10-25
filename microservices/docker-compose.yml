@@ -1,0 +1,31 @@
+services:
+  # One Postgres server holding four databases (catalog, checkout, inventory, analytics), one per
+  # service; db/reset.sh creates them. Same container as earlier weeks.
+  db:
+    image: postgres:18
+    container_name: checkout-db
+    environment:
+      POSTGRES_USER: checkout
+      POSTGRES_PASSWORD: checkout
+      POSTGRES_DB: checkout
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U checkout -d checkout"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  # Services run on the host (:8081-8084); host networking lets nginx reach them at 127.0.0.1.
+  # Own name so it doesn't collide with week 4's checkout-gateway (both bind :8080; run one at a time).
+  gateway:
+    image: nginx:1.27-alpine
+    container_name: ms-gateway
+    network_mode: host
+    volumes:
+      - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+
+volumes:
+  pgdata:

@@ -4,6 +4,7 @@ monolith/build/
 layered/build/
 pipeline/build/
 services/build/
+microservices/build/
 *.swp
 load-client/out/
 .vscode/
