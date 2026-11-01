@@ -1,0 +1,68 @@
+// Week 6 architecture: four microservices, each with its own database, talking only through Kafka.
+// Render: dot -Tsvg docs/architecture.dot -o docs/architecture.svg && dot -Tpng -Gdpi=150 docs/architecture.dot -o docs/architecture.png
+digraph architecture {
+    graph [fontname="Helvetica", fontsize=12, rankdir=TB, nodesep=0.45, ranksep=0.6, newrank=true,
+           label="Solid gray: HTTP (request/response) · Colored: events through Kafka (asynchronous, durable) · Dashed: read once at startup",
+           labelloc=b];
+    node  [fontname="Helvetica", fontsize=11, shape=box, style="rounded,filled", fillcolor="#ffffff", color="#555555"];
+    edge  [fontname="Helvetica", fontsize=9, color="#777777", fontcolor="#444444"];
+
+    client  [label="Load client\njava -cp out Main", fillcolor="#eeeeee"];
+    gateway [label="API gateway: nginx :8080\nroutes by path prefix", fillcolor="#eeeeee"];
+    client -> gateway [label="HTTP"];
+
+    subgraph cluster_catalog {
+        label="catalog-service :8081"; style="rounded"; color="#999999";
+        catalog   [label="GET /items\npublishes the catalog at startup"];
+        catalogDb [label="catalog DB\nitems", shape=cylinder, fillcolor="#f3f3f3", style=filled];
+        catalog -> catalogDb [dir=both, arrowsize=0.6];
+    }
+    subgraph cluster_checkout {
+        label="checkout-service :8082"; style="rounded"; color="#999999";
+        checkout   [label="POST /transactions, /items, /complete\nGET /transactions/{id}\nbaskets in RAM"];
+        checkoutDb [label="checkout DB\nsales · receipt_lines · sale_outbox\n(sale + outbox row: one transaction)", shape=cylinder, fillcolor="#f3f3f3", style=filled];
+        checkout -> checkoutDb [dir=both, arrowsize=0.6, label="complete_sale()"];
+    }
+    subgraph cluster_inventory {
+        label="inventory-service :8083"; style="rounded"; color="#999999";
+        inventory   [label="GET /inventory/low-stock\nconsumer thread: apply_sales()"];
+        inventoryDb [label="inventory DB\nstock · applied_sales\n(dedup by transaction id)", shape=cylinder, fillcolor="#f3f3f3", style=filled];
+        inventory -> inventoryDb [dir=both, arrowsize=0.6];
+    }
+    subgraph cluster_analytics {
+        label="analytics-service :8084"; style="rounded"; color="#999999";
+        analytics   [label="GET /analytics/popular-items\nconsumer thread → window → rank\n→ format → persist pipeline"];
+        analyticsDb [label="analytics DB\npopular_snapshots", shape=cylinder, fillcolor="#f3f3f3", style=filled];
+        analytics -> analyticsDb [dir=both, arrowsize=0.6];
+    }
+
+    gateway -> catalog   [label="/items"];
+    gateway -> checkout  [label="/transactions/**"];
+    gateway -> inventory [label="/inventory/**"];
+    gateway -> analytics [label="/analytics/**"];
+
+    subgraph cluster_kafka {
+        label="Event broker: Kafka 3.9 (single node, KRaft) :9092"; style="rounded,filled"; fillcolor="#f7f4ec"; color="#b59b55";
+        tCatalog [label="catalog.items\ncompacted · key \"items\"\nvalue = whole catalog", fillcolor="#e8f5e9", color="#2e7d32"];
+        tSales   [label="sales.completed\nkey = transaction id\none event per sale", fillcolor="#fdecea", color="#c62828"];
+        tScans   [label="items.scanned\nkey = transaction id\none event per scan", fillcolor="#e3f2fd", color="#1565c0"];
+    }
+    { rank=same; catalogDb; checkoutDb; inventoryDb; analyticsDb; }
+    { rank=same; tCatalog; tSales; tScans; }
+
+    // Producers (arrows point into the broker).
+    // Invisible: put each topic under the service that consumes it, so the event edges run vertically.
+    catalogDb  -> tCatalog [style=invis];
+    inventoryDb -> tSales  [style=invis];
+    analyticsDb -> tScans  [style=invis];
+    catalog    -> tCatalog [color="#2e7d32", fontcolor="#2e7d32", penwidth=1.6, label="CatalogPublished\n(at startup)"];
+    checkoutDb -> tSales   [color="#c62828", fontcolor="#c62828", penwidth=1.6, label="outbox relay:\nSaleCompleted\n(row deleted after broker ack)"];
+    checkout   -> tScans   [color="#1565c0", fontcolor="#1565c0", penwidth=1.6, label="ItemScanned\n(queued, never blocks a scan)"];
+
+    // Consumers (drawn service -> topic to keep topics below, arrow reversed to point at the consumer).
+    checkout  -> tCatalog [dir=back, color="#2e7d32", style=dashed];
+    inventory -> tCatalog [dir=back, color="#2e7d32", style=dashed];
+    analytics -> tCatalog [dir=back, color="#2e7d32", style=dashed, label="read from offset 0\nat startup", fontcolor="#2e7d32"];
+    inventory -> tSales   [dir=back, color="#c62828", fontcolor="#c62828", penwidth=1.6, label="group \"inventory\":\ncommit offset after\napply_sales commits"];
+    analytics -> tScans   [dir=back, color="#1565c0", fontcolor="#1565c0", penwidth=1.6, label="group \"analytics\""];
+}

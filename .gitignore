@@ -5,6 +5,7 @@ layered/build/
 pipeline/build/
 services/build/
 microservices/build/
+event-driven/build/
 *.swp
 load-client/out/
 .vscode/

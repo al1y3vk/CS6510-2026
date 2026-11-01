@@ -1,0 +1,52 @@
+services:
+  # One Postgres server holding four databases (catalog, checkout, inventory, analytics), one per
+  # service; db/reset.sh creates them. Same container as earlier weeks.
+  db:
+    image: postgres:18
+    container_name: checkout-db
+    environment:
+      POSTGRES_USER: checkout
+      POSTGRES_PASSWORD: checkout
+      POSTGRES_DB: checkout
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U checkout -d checkout"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  # Event broker: single-node Kafka in KRaft mode (no ZooKeeper). Host networking so it listens on
+  # localhost:9092 and advertises that same address. No volume: topics live in the container.
+  broker:
+    image: apache/kafka:3.9.1
+    container_name: kafka
+    network_mode: host
+    environment:   # the image's single-node defaults, plus the last line
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://localhost:9092,CONTROLLER://localhost:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      # Default 3 s: the broker waits that long for more members before handing a new group its
+      # partitions. Each group here has one consumer, so that is just 3 s of lag after startup.
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+
+  # Services run on the host (:8081-8084); host networking lets nginx reach them at 127.0.0.1.
+  # Own name so it doesn't collide with weeks 4-5's gateways (all bind :8080; run one at a time).
+  gateway:
+    image: nginx:1.27-alpine
+    container_name: events-gateway
+    network_mode: host
+    volumes:
+      - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+
+volumes:
+  pgdata:
